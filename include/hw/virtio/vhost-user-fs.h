@@ -23,6 +23,49 @@
 #define TYPE_VHOST_USER_FS "vhost-user-fs-device"
 OBJECT_DECLARE_SIMPLE_TYPE(VHostUserFS, VHOST_USER_FS)
 
+/* Structures carried over the slave channel back to QEMU */
+#define VHOST_USER_FS_SLAVE_MAX_ENTRIES 32
+
+/* For the flags field of VhostUserFSSlaveMsg */
+#define VHOST_USER_FS_FLAG_MAP_R (1u << 0)
+#define VHOST_USER_FS_FLAG_MAP_W (1u << 1)
+
+typedef struct {
+    /* Offsets within the file being mapped */
+    uint64_t fd_offset;
+    /* Offsets within the cache */
+    uint64_t c_offset;
+    /* Lengths of sections */
+    uint64_t len;
+    /* Flags, from VHOST_USER_FS_FLAG_* */
+    uint64_t flags;
+} VhostUserFSSlaveMsgEntry;
+
+typedef struct {
+    /* Spare */
+    uint32_t align32;
+    /* Number of entries */
+    uint16_t count;
+    /* Spare */
+    uint16_t align16;
+} VhostUserFSSlaveMsgHdr;
+
+/*
+ * This is really a structure with a variable number of entries,
+ * but we want to avoid a variable length array in the union,
+ * so have one version with the variable length array
+ * for places where we have the partial allocation.
+ */
+typedef struct {
+    VhostUserFSSlaveMsgHdr hdr;
+    VhostUserFSSlaveMsgEntry entries[];
+} VhostUserFSSlaveMsg;
+
+typedef struct {
+    VhostUserFSSlaveMsgHdr hdr;
+    VhostUserFSSlaveMsgEntry entries[VHOST_USER_FS_SLAVE_MAX_ENTRIES];
+} VhostUserFSSlaveMsgMax;
+
 typedef struct {
     CharBackend chardev;
     char *tag;
@@ -45,5 +88,11 @@ struct VHostUserFS {
     /*< public >*/
     MemoryRegion cache;
 };
+
+/* Callbacks from the vhost-user code for slave commands */
+uint64_t vhost_user_fs_slave_map(struct vhost_dev *dev, size_t message_size,
+                                 VhostUserFSSlaveMsg *sm, int fd);
+uint64_t vhost_user_fs_slave_unmap(struct vhost_dev *dev, size_t message_size,
+                                   VhostUserFSSlaveMsg *sm);
 
 #endif /* _QEMU_VHOST_USER_FS_H */
