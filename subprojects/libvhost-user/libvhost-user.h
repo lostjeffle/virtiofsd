@@ -122,6 +122,49 @@ typedef enum VhostUserSlaveRequest {
     VHOST_USER_SLAVE_MAX
 }  VhostUserSlaveRequest;
 
+/* Structures carried over the slave channel back to QEMU */
+#define VHOST_USER_FS_SLAVE_MAX_ENTRIES 32
+
+/* For the flags field of VhostUserFSSlaveMsg */
+#define VHOST_USER_FS_FLAG_MAP_R (1u << 0)
+#define VHOST_USER_FS_FLAG_MAP_W (1u << 1)
+
+typedef struct {
+    /* Offsets within the file being mapped */
+    uint64_t fd_offset;
+    /* Offsets within the cache */
+    uint64_t c_offset;
+    /* Lengths of sections */
+    uint64_t len;
+    /* Flags, from VHOST_USER_FS_FLAG_* */
+    uint64_t flags;
+} VhostUserFSSlaveMsgEntry;
+
+typedef struct {
+    /* Spare */
+    uint32_t align32;
+    /* Number of entries */
+    uint16_t count;
+    /* Spare */
+    uint16_t align16;
+} VhostUserFSSlaveMsgHdr;
+
+/*
+ * This is really a structure with a variable number of entries,
+ * but we want to avoid a variable length array in the union,
+ * so have one version with the variable length array
+ * for places where we have the partial allocation.
+ */
+typedef struct {
+    VhostUserFSSlaveMsgHdr hdr;
+    VhostUserFSSlaveMsgEntry entries[];
+} VhostUserFSSlaveMsg;
+
+typedef struct {
+    VhostUserFSSlaveMsgHdr hdr;
+    VhostUserFSSlaveMsgEntry entries[VHOST_USER_FS_SLAVE_MAX_ENTRIES];
+} VhostUserFSSlaveMsgMax;
+
 typedef struct VhostUserMemoryRegion {
     uint64_t guest_phys_addr;
     uint64_t memory_size;
@@ -197,6 +240,7 @@ typedef struct VhostUserMsg {
         VhostUserConfig config;
         VhostUserVringArea area;
         VhostUserInflight inflight;
+        VhostUserFSSlaveMsgMax fs_max;
     } payload;
 
     int fds[VHOST_MEMORY_BASELINE_NREGIONS];
@@ -692,5 +736,17 @@ void vu_queue_get_avail_bytes(VuDev *vdev, VuVirtq *vq, unsigned int *in_bytes,
  */
 bool vu_queue_avail_bytes(VuDev *dev, VuVirtq *vq, unsigned int in_bytes,
                           unsigned int out_bytes);
+
+/**
+ * vu_fs_cache_request: Send a slave message for an fs client
+ * @dev: a VuDev context
+ * @req: The request type (map, unmap, sync)
+ * @fd: an fd (only required for map, else must be -1)
+ * @fsm: The body of the message
+ *
+ * Returns: 0 or above for success, nevative errno on error
+ */
+int64_t vu_fs_cache_request(VuDev *dev, VhostUserSlaveRequest req, int fd,
+                            VhostUserFSSlaveMsg *fsm);
 
 #endif /* LIBVHOST_USER_H */
