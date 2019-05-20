@@ -403,31 +403,31 @@ int vhost_backend_invalidate_device_iotlb(struct vhost_dev *dev,
     return -ENODEV;
 }
 
-int vhost_backend_handle_iotlb_msg(struct vhost_dev *dev,
-                                          struct vhost_iotlb_msg *imsg)
+uint64_t vhost_backend_handle_iotlb_msg(struct vhost_dev *dev,
+                                        struct vhost_iotlb_msg *imsg)
 {
-    int ret = 0;
+    uint64_t ret = 0;
 
     if (unlikely(!dev->vdev)) {
         error_report("Unexpected IOTLB message when virtio device is stopped");
-        return -EINVAL;
+        return EINVAL;
     }
 
     switch (imsg->type) {
     case VHOST_IOTLB_MISS:
-        ret = vhost_device_iotlb_miss(dev, imsg->iova,
-                                      imsg->perm != VHOST_ACCESS_RO);
+        ret = -vhost_device_iotlb_miss(dev, imsg->iova,
+                                       imsg->perm != VHOST_ACCESS_RO);
         break;
     case VHOST_IOTLB_ACCESS_FAIL:
         /* FIXME: report device iotlb error */
         error_report("Access failure IOTLB message type not supported");
-        ret = -ENOTSUP;
+        ret = ENOTSUP;
         break;
     case VHOST_IOTLB_UPDATE:
     case VHOST_IOTLB_INVALIDATE:
     default:
         error_report("Unexpected IOTLB message type");
-        ret = -EINVAL;
+        ret = EINVAL;
         break;
     }
 
