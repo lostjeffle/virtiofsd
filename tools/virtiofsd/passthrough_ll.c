@@ -185,6 +185,7 @@ struct lo_data {
     int readdirplus_clear;
     int allow_direct_io;
     int announce_submounts;
+    int user_dax;
     int dax;
     bool use_statx;
     struct lo_inode root;
@@ -235,6 +236,10 @@ static const struct fuse_opt lo_opts[] = {
     { "no_killpriv_v2", offsetof(struct lo_data, user_killpriv_v2), 0 },
     { "posix_acl", offsetof(struct lo_data, user_posix_acl), 1 },
     { "no_posix_acl", offsetof(struct lo_data, user_posix_acl), 0 },
+    { "dax=none", offsetof(struct lo_data, user_dax), INODE_DAX_NONE },
+    { "dax=always", offsetof(struct lo_data, user_dax), INODE_DAX_ALWAYS },
+    { "dax=inode", offsetof(struct lo_data, user_dax), INODE_DAX_INODE },
+    { "dax=filesize", offsetof(struct lo_data, user_dax), INODE_DAX_FILESIZE },
     FUSE_OPT_END
 };
 static bool use_syslog = false;
@@ -758,6 +763,21 @@ static void lo_init(void *userdata, struct fuse_conn_info *conn)
         /* User either did not specify anything or wants it disabled */
         fuse_log(FUSE_LOG_DEBUG, "lo_init: disabling posix_acl\n");
         conn->want &= ~FUSE_CAP_POSIX_ACL;
+    }
+
+    if (conn->capable & FUSE_CAP_INODE_DAX) {
+        lo->dax = lo->user_dax;
+    } else {
+        /* Set INODE_DAX_NONE explicitly to override the old value */
+        lo->dax = INODE_DAX_NONE;
+    }
+
+    /*
+     * If no dax policy is specified, then virtiofsd won't advertise support
+     * for per indoe DAX.
+     */
+    if (lo->dax != INODE_DAX_NONE) {
+        conn->want |= FUSE_CAP_INODE_DAX;
     }
 }
 

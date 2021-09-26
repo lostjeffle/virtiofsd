@@ -2093,6 +2093,9 @@ static void do_init(fuse_req_t req, fuse_ino_t nodeid,
     if (flags & FUSE_SETXATTR_EXT) {
         se->conn.capable |= FUSE_CAP_SETXATTR_EXT;
     }
+    if (flags & FUSE_HAS_INODE_DAX) {
+        se->conn.capable |= FUSE_CAP_INODE_DAX;
+    }
 #ifdef HAVE_SPLICE
 #ifdef HAVE_VMSPLICE
     se->conn.capable |= FUSE_CAP_SPLICE_WRITE | FUSE_CAP_SPLICE_MOVE;
@@ -2207,6 +2210,9 @@ static void do_init(fuse_req_t req, fuse_ino_t nodeid,
     }
     if (se->conn.want & FUSE_CAP_POSIX_ACL) {
         outarg.flags |= FUSE_POSIX_ACL;
+    }
+    if (se->conn.want & FUSE_CAP_INODE_DAX) {
+        outarg.flags2 |= FUSE_HAS_INODE_DAX >> 32;
     }
     outarg.max_readahead = se->conn.max_readahead;
     outarg.max_write = se->conn.max_write;

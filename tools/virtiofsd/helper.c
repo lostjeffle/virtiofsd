@@ -187,6 +187,12 @@ void fuse_cmdline_help(void)
            "                               default: no_allow_direct_io\n"
            "    -o announce_submounts      Announce sub-mount points to the guest\n"
            "    -o posix_acl/no_posix_acl  Enable/Disable posix_acl. (default: disabled)\n"
+           "    -o dax=<policy>            policies of constructing per-inode DAX attribute when\n"
+           "                               guest advertises per-inode DAX mode.\n"
+           "                               - none: default, disable DAX for all files\n"
+           "                               - always: enable DAX for all files\n"
+           "                               - inode: depending on persistent inode flags\n"
+           "                               - filesize: depending on file size\n"
            );
 }
 
