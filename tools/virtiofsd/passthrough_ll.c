@@ -54,12 +54,27 @@
 #include <sys/syscall.h>
 #include <sys/wait.h>
 #include <sys/xattr.h>
+#include <sys/user.h>
 #include <syslog.h>
 #include <linux/fs.h>
 
 #include "qemu/cutils.h"
 #include "passthrough_helpers.h"
 #include "passthrough_seccomp.h"
+
+/*
+ * One page descriptor (64 bytes in size) needs to be maintained for every page
+ * in the DAX window chunk, i.e., there is certain guest memory overhead when
+ * DAX is enabled. Thus disable DAX for those with file size smaller than this
+ * certain memory overhead if virtiofs is mounted in per inode DAX mode. In
+ * this case, the guest page cache will consume less memory than that when DAX
+ * is enabled.
+ */
+#define FUSE_DAX_SHIFT      21
+#define PAGE_DESC_SHIFT     6
+#define FUSE_INODE_DAX_SHIFT \
+    (FUSE_DAX_SHIFT - PAGE_SHIFT + PAGE_DESC_SHIFT)
+#define FUSE_INODE_DAX_THRESH  (1 << FUSE_INODE_DAX_SHIFT)
 
 /* Keep track of inode posix locks for each owner. */
 struct lo_inode_plock {
@@ -138,6 +153,13 @@ enum {
     SANDBOX_CHROOT,
 };
 
+enum {
+    INODE_DAX_NONE,
+    INODE_DAX_ALWAYS,
+    INODE_DAX_INODE,
+    INODE_DAX_FILESIZE,
+};
+
 typedef struct xattr_map_entry {
     char *key;
     char *prepend;
@@ -163,6 +185,7 @@ struct lo_data {
     int readdirplus_clear;
     int allow_direct_io;
     int announce_submounts;
+    int dax;
     bool use_statx;
     struct lo_inode root;
     GHashTable *inodes; /* protected by lo->mutex */
@@ -1002,6 +1025,42 @@ static int do_statx(struct lo_data *lo, int dirfd, const char *pathname,
     return 0;
 }
 
+static int lo_should_enable_dax(struct lo_data *lo, struct lo_inode *inode,
+                                struct fuse_entry_param *e)
+{
+    if (lo->dax == INODE_DAX_NONE || !S_ISREG(e->attr.st_mode)) {
+        return 0;
+    }
+
+    if (lo->dax == INODE_DAX_ALWAYS) {
+        return 1;
+    }
+
+    if (lo->dax == INODE_DAX_INODE) {
+        int res, fd;
+        unsigned int attr;
+
+        fd = lo_inode_open(lo, inode, O_RDONLY);
+        if (fd == -1) {
+            return -1;
+        }
+
+        res = ioctl(fd, FS_IOC_GETFLAGS, &attr);
+        if (res == 0 && (attr & FS_DAX_FL)) {
+            res = 1;
+        }
+
+        close(fd);
+        return res;
+    }
+
+    if (lo->dax == INODE_DAX_FILESIZE) {
+        return e->attr.st_size > FUSE_INODE_DAX_THRESH;
+    }
+
+    return -1;
+}
+
 /*
  * Increments nlookup on the inode on success. unref_inode_lolocked() must be
  * called eventually to decrement nlookup again. If inodep is non-NULL, the
@@ -1049,6 +1108,7 @@ static int lo_do_lookup(fuse_req_t req, fuse_ino_t parent, const char *name,
     res = do_statx(lo, newfd, "", &e->attr, AT_EMPTY_PATH | AT_SYMLINK_NOFOLLOW,
                    &mnt_id);
     if (res == -1) {
+        close(newfd);
         goto out_err;
     }
 
@@ -1092,6 +1152,13 @@ static int lo_do_lookup(fuse_req_t req, fuse_ino_t parent, const char *name,
     }
     e->ino = inode->fuse_ino;
 
+    res = lo_should_enable_dax(lo, inode, e);
+    if (res == -1) {
+        goto out_err;
+    } else if (res == 1) {
+        e->attr_flags |= FUSE_ATTR_DAX;
+    }
+
     /* Transfer ownership of inode pointer to caller or drop it */
     if (inodep) {
         *inodep = inode;
@@ -1108,9 +1175,6 @@ static int lo_do_lookup(fuse_req_t req, fuse_ino_t parent, const char *name,
 
 out_err:
     saverr = errno;
-    if (newfd != -1) {
-        close(newfd);
-    }
     lo_inode_put(lo, &inode);
     lo_inode_put(lo, &dir);
     return saverr;
